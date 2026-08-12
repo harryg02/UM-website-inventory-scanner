@@ -85,13 +85,18 @@ class Crawler:
                 frontier.append(norm)
                 self._record(norm, "seed")
 
+    def _page_budget_spent(self) -> bool:
+        """max_pages of 0 means crawl until the frontier runs dry."""
+        return bool(self.s.max_pages) and self.result.pages_fetched >= self.s.max_pages
+
     def _loop(self, pool, frontier: deque, queued: set, pages_by_host: Counter) -> None:
         batch_size = max(1, self.s.crawl_workers * 2)
 
-        while frontier and self.result.pages_fetched < self.s.max_pages:
+        while frontier and not self._page_budget_spent():
             batch: list[str] = []
             while frontier and len(batch) < batch_size:
-                if self.result.pages_fetched + len(batch) >= self.s.max_pages:
+                if self.s.max_pages and \
+                        self.result.pages_fetched + len(batch) >= self.s.max_pages:
                     break
                 url = frontier.popleft()
                 host = u.host_of(url)

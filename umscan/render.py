@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from dataclasses import dataclass
 
 from .config import USER_AGENT
@@ -51,39 +52,60 @@ class PlaywrightFetcher:
     """
 
     def __init__(self, timeout: float = 30.0, challenge_wait: float = 15.0,
-                 headless: bool = True, block_assets: bool = True):
+                 headless: bool = True, block_assets: bool = True,
+                 workers: int = 3):
         self.timeout = timeout
         self.challenge_wait = challenge_wait
         self.headless = headless
         self.block_assets = block_assets
+        self.workers = max(1, workers)
 
         self.error = ""
         self._jobs: queue.Queue = queue.Queue()
         self._ready = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._threads: list = []
+        self._live = 0
+        self._live_lock = threading.Lock()
         self._closed = False
 
     # -- lifecycle ---------------------------------------------------------
     def start(self) -> bool:
+        """Bring up the pool. Ready as soon as the first browser answers."""
         if not playwright_available():
             self.error = "playwright not installed"
             return False
-        self._thread = threading.Thread(target=self._worker, name="renderer", daemon=True)
-        self._thread.start()
-        self._ready.wait(120)
-        return not self.error
+        for index in range(self.workers):
+            thread = threading.Thread(target=self._worker, name=f"renderer-{index}",
+                                      daemon=True)
+            thread.start()
+            self._threads.append(thread)
+        self._ready.wait(180)
+        # First browser up means we can serve, but let the rest of the pool
+        # finish launching so the crawl starts at full parallelism.
+        deadline = time.monotonic() + 45
+        while self.live < self.workers and time.monotonic() < deadline:
+            if not any(t.is_alive() for t in self._threads):
+                break
+            time.sleep(0.2)
+        return self.live > 0
+
+    @property
+    def live(self) -> int:
+        with self._live_lock:
+            return self._live
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        self._jobs.put(None)
-        if self._thread:
-            self._thread.join(timeout=30)
+        for _ in self._threads:
+            self._jobs.put(None)
+        for thread in self._threads:
+            thread.join(timeout=30)
 
     # -- public API --------------------------------------------------------
     def get(self, url: str, retries: int = 0) -> Response:
-        if self.error or self._closed:
+        if self._closed or self.live == 0:
             return Response(url, RENDER_UNAVAILABLE,
                             note=self.error or "renderer closed")
 
@@ -92,8 +114,9 @@ class PlaywrightFetcher:
         # others. Budget for the queue ahead of it, not just its own render.
         pending = self._jobs.qsize()
         per_job = self.timeout + self.challenge_wait + 30
+        ahead = pending // max(1, self.live)
         self._jobs.put(job)
-        if not job.done.wait(per_job * (1 + pending)):
+        if not job.done.wait(per_job * (1 + ahead)):
             return Response(url, ERROR, note="renderer did not respond")
         return job.response or Response(url, ERROR, note="renderer returned nothing")
 
@@ -120,6 +143,8 @@ class PlaywrightFetcher:
                     context.route("**/*", _skip_heavy_assets)
 
                 page = context.new_page()
+                with self._live_lock:
+                    self._live += 1
                 self._ready.set()
 
                 while True:
@@ -134,7 +159,8 @@ class PlaywrightFetcher:
                     finally:
                         job.done.set()
         except Exception as exc:
-            self.error = f"{type(exc).__name__}: {exc}"[:300]
+            if not self.error:
+                self.error = f"{type(exc).__name__}: {exc}"[:300]
             self._ready.set()
         finally:
             for closer in (context, browser):
@@ -143,7 +169,12 @@ class PlaywrightFetcher:
                         closer.close()
                 except Exception:
                     pass
-            self._drain()
+            with self._live_lock:
+                if self._live:
+                    self._live -= 1
+                last_one_out = self._live == 0
+            if last_one_out:
+                self._drain()
 
     def _drain(self) -> None:
         """Release anyone still waiting after the worker gives up."""
@@ -261,6 +292,7 @@ class HybridFetcher:
         self.plain = plain
         self.renderer = renderer
         self.force = force
+        self.rendering_enabled = True
         self.attempted = 0
         self.succeeded = 0
         self.still_blocked = 0
@@ -269,7 +301,8 @@ class HybridFetcher:
 
     @property
     def enabled(self) -> bool:
-        return self.renderer is not None and not self.renderer.error
+        return (self.rendering_enabled and self.renderer is not None
+                and self.renderer.live > 0)
 
     def get(self, url: str, retries: int = 1) -> Response:
         if self.force and self.enabled:

@@ -109,7 +109,7 @@ class Settings:
     seeds: list = field(default_factory=lambda: list(SEED_URLS))
     fallback_seeds: list = field(default_factory=lambda: list(FALLBACK_SEEDS))
     pages_per_domain: int = 10
-    max_pages: int = 400
+    max_pages: int = 2000         # 0 = crawl until the frontier is exhausted
     max_domains: int = 0          # 0 = unlimited
     crawl_workers: int = 8
     profile_workers: int = 6

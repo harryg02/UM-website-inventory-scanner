@@ -307,6 +307,26 @@ class _StubFetcher:
         pass
 
 
+class TestPageBudget(unittest.TestCase):
+    def test_zero_means_unlimited(self):
+        from umscan.config import Settings
+        from umscan.crawl import Crawler
+
+        crawler = Crawler(Settings(max_pages=0), fetcher=None)
+        crawler.result.pages_fetched = 10_000
+        self.assertFalse(crawler._page_budget_spent())
+
+    def test_positive_budget_is_enforced(self):
+        from umscan.config import Settings
+        from umscan.crawl import Crawler
+
+        crawler = Crawler(Settings(max_pages=50), fetcher=None)
+        crawler.result.pages_fetched = 49
+        self.assertFalse(crawler._page_budget_spent())
+        crawler.result.pages_fetched = 50
+        self.assertTrue(crawler._page_budget_spent())
+
+
 class TestReportColumns(unittest.TestCase):
     def test_csv_has_four_columns_without_source_url(self):
         self.assertEqual(report.COLUMNS,
@@ -356,6 +376,7 @@ class TestRenderPolicy(unittest.TestCase):
 
         class _StubRenderer:
             error = ""
+            live = 1
             def __init__(self): self.calls = 0
             def get(self, url, retries=0):
                 self.calls += 1
@@ -369,11 +390,41 @@ class TestRenderPolicy(unittest.TestCase):
         self.assertEqual(renderer.calls, 1)
         self.assertEqual(h.stats()["succeeded"], 1)
 
+    def test_rendering_can_be_switched_off_between_phases(self):
+        """--render-crawl-only flips this after the crawl; no domain is dropped."""
+        plain = _StubFetcher(Response("u", CHALLENGED, 403))
+
+        class _StubRenderer:
+            error = ""
+            live = 1
+            def __init__(self): self.calls = 0
+            def get(self, url, retries=0):
+                self.calls += 1
+                return Response(url, OK, 200, text="<html><a href='/a'>a</a></html>")
+            def close(self): pass
+
+        renderer = _StubRenderer()
+        h = HybridFetcher(plain, renderer)
+        h.get("https://a.umich.edu/")
+        self.assertEqual(renderer.calls, 1)
+
+        h.rendering_enabled = False
+        self.assertFalse(h.enabled)
+        result = h.get("https://b.umich.edu/")
+        self.assertEqual(renderer.calls, 1)          # no further renders
+        self.assertEqual(result.status, CHALLENGED)  # still returns a usable row
+
+    def test_dead_pool_reports_unavailable(self):
+        r = PlaywrightFetcher(workers=2)
+        self.assertEqual(r.live, 0)
+        self.assertEqual(r.get("https://x.umich.edu/").status, RENDER_UNAVAILABLE)
+
     def test_hybrid_keeps_original_verdict_when_render_fails(self):
         plain = _StubFetcher(Response("u", CHALLENGED, 403, note="interstitial"))
 
         class _StubRenderer:
             error = ""
+            live = 1
             def get(self, url, retries=0):
                 return Response(url, CHALLENGED, 403, note="challenge did not clear")
             def close(self): pass

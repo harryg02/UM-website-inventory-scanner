@@ -29,8 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also write an audit CSV with scores and signals")
     p.add_argument("--pages-per-domain", type=int, default=10,
                    help="page cap per host (default: 10)")
-    p.add_argument("--max-pages", type=int, default=400,
-                   help="total pages to fetch (default: 400)")
+    p.add_argument("--max-pages", type=int, default=2000,
+                   help="total pages to fetch; 0 crawls until the frontier is "
+                        "exhausted (default: 2000)")
     p.add_argument("--max-domains", type=int, default=0,
                    help="stop after discovering this many domains (0 = no cap)")
     p.add_argument("--crawl-workers", type=int, default=8)
@@ -44,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="escalate to a real browser for challenge pages and JS-only sites")
     p.add_argument("--render-all", action="store_true",
                    help="render every page in the browser (slow; implies --render)")
+    p.add_argument("--render-workers", type=int, default=3,
+                   help="parallel browser workers (default: 3)")
+    p.add_argument("--render-crawl-only", action="store_true",
+                   help="use the browser for link discovery but not for contact "
+                        "pages; every domain is still profiled and reported")
     p.add_argument("--render-wait", type=float, default=15.0,
                    help="seconds to let an interstitial resolve itself (default: 15)")
     p.add_argument("--render-headful", action="store_true",
@@ -91,11 +97,13 @@ def main(argv=None) -> int:
                              playwright_available)
         renderer = PlaywrightFetcher(timeout=s.http_timeout + 10,
                                      challenge_wait=args.render_wait,
-                                     headless=not args.render_headful)
+                                     headless=not args.render_headful,
+                                     workers=args.render_workers)
         if renderer.start():
             hybrid = HybridFetcher(plain, renderer, force=args.render_all)
             fetcher = hybrid
-            print("[render] browser fallback active", file=sys.stderr)
+            print(f"[render] browser fallback active "
+                  f"({renderer.live} worker(s))", file=sys.stderr)
         else:
             print(f"[render] disabled: {renderer.error}", file=sys.stderr)
             if not playwright_available():
@@ -105,12 +113,21 @@ def main(argv=None) -> int:
     profiler = Profiler(s, fetcher, whois)
 
     started = time.monotonic()
+    budget = f"max {s.max_pages} pages" if s.max_pages else "no page limit"
     print(f"[1/2] crawling from {', '.join(s.seeds)} "
-          f"(max {s.max_pages} pages, {s.pages_per_domain}/host)", file=sys.stderr)
+          f"({budget}, {s.pages_per_domain}/host)", file=sys.stderr)
 
     profiles = []
     try:
         crawl_result = crawler.run()
+
+        # Link discovery is where the browser earns its cost. Contact pages
+        # are optional extra evidence, so --render-crawl-only stops here --
+        # every domain is still profiled and still lands in the CSV.
+        if hybrid and args.render_crawl_only:
+            hybrid.rendering_enabled = False
+            print("[render] browser off for the profiling phase", file=sys.stderr)
+
         hits = sorted(crawl_result.domains.values(),
                       key=lambda h: (h.kind != u.INTERNAL, h.domain))
         print(f"[2/2] profiling {len(hits)} domains "

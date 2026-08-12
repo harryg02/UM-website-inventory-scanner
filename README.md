@@ -56,6 +56,20 @@ which 15 recovered and 1 stayed blocked. `--render-all` renders everything
 (much slower), `--render-wait` controls how long an interstitial is given to
 resolve, and `--render-headful` shows the browser window.
 
+The browser runs as a pool of `--render-workers` (default 3), each owning its
+own Chromium. Playwright's sync API is bound to the thread that creates it, so
+parallelism comes from independent workers sharing one job queue rather than
+from sharing a browser. Six challenge-gated pages render in about two seconds
+on a 3-worker pool.
+
+`--render-crawl-only` uses the browser for link discovery but not for contact
+pages. **No domain is skipped or dropped** — every domain still gets a WHOIS
+lookup, an affiliation verdict and a CSV row. What you give up is on-page
+evidence for external sites whose homepage is challenge-blocked, which can move
+a domain from `external-affiliated` down to `external-review`. Use it when you
+want discovery breadth quickly; leave it off for the most confident
+classification.
+
 Without Playwright installed the flag prints install instructions and the scan
 continues over plain HTTP, so nothing breaks.
 
