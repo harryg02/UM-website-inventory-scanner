@@ -1,0 +1,5 @@
+# Core: the only hard dependency. WHOIS is spoken over port 43 directly and
+# HTML is parsed with the standard library, so nothing else is needed.
+requests>=2.31
+
+# For the --render browser fallback, install requirements-render.txt instead.

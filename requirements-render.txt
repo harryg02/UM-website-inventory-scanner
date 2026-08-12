@@ -1,0 +1,4 @@
+# Browser fallback for --render. After installing, fetch the browser binary:
+#   playwright install chromium
+-r requirements.txt
+playwright>=1.40
