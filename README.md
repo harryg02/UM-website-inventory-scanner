@@ -27,6 +27,7 @@ debugging without cluttering the deliverable.
 ```bash
 python3 scan.py                          # full scan -> inventory.csv
 python3 scan.py --max-pages 100 -v       # smaller, chatty run
+python3 scan.py --max-pages 0            # crawl everything reachable
 python3 scan.py --evidence audit.csv     # also write the scoring audit trail
 python3 scan.py --skip-whois             # crawl + contacts only (much faster)
 ```
@@ -84,8 +85,8 @@ python3 test_umscan.py    # 24 offline tests, no network needed
 - Starts at `https://www.umich.edu/`.
 - Follows `*.umich.edu` links recursively; marks them `internal`.
 - Logs external links once, marks them external, and never follows them.
-- Caps each host at 10 pages (`--pages-per-domain`), 400 pages overall
-  (`--max-pages`).
+- Caps each host at 10 pages (`--pages-per-domain`), 2000 pages overall
+  (`--max-pages`; pass `0` to crawl until the frontier is exhausted).
 - Skips noise entirely: Google, LinkedIn, Facebook, CDNs, analytics, scholarly
   plumbing like `doi.org`, and **every `.edu` that isn't UM**. Noise domains are
   not logged, not looked up, and not followed.
@@ -124,12 +125,60 @@ Score ≥ 6 is `external-affiliated`, 3–5 is `external-review`, below that is
 ambiguous domains to a human instead of guessing. Run with `--evidence` to get
 the per-domain score and the exact signals behind it.
 
+**Page evidence carries more weight than WHOIS.** Registrant data is
+privacy-redacted on most `.com`/`.org` domains now, so WHOIS rarely settles
+anything on its own -- it contributes mostly through nameservers. Measured on
+four known UM properties:
+
+| domain | pages only | WHOIS only | both |
+| --- | --- | --- | --- |
+| `uofmhealth.org` | affiliated (9) | review (4) | affiliated (9) |
+| `michiganmedicine.org` | affiliated (10) | review (4) | affiliated (10) |
+| `ums.org` | affiliated (7) | review (4) | affiliated (11) |
+| `michigandaily.com` | affiliated (11) | unrelated (1) | affiliated (11) |
+
+Page evidence alone classified all four; WHOIS alone classified none. If you
+need to trade something away for speed, use `--skip-whois` rather than
+`--skip-contacts` -- WHOIS is also the rate-limited half. The two are
+independent: either can be skipped without affecting the other.
+
 Two real examples of why the multi-signal approach matters:
 
 - `michiganradio.org` — WHOIS registrant is redacted behind a privacy proxy,
   but its nameservers are `cffw1.dns.umich.com` and the site names UM. Scores
   10, correctly affiliated.
 - `michigan.gov` — has "michigan" in the name and nothing else. Scores 0.
+
+## Tuning coverage
+
+Domain discovery is bounded by the page budget, not by the crawler running out
+of links. Measured, crawl-only, with `--render`:
+
+| pages | domains found |
+| --- | --- |
+| 30 | 162 |
+| 60 | ~208 |
+| 800 | 895 (507 internal, 388 external) |
+
+The 800-page run stopped because it hit the cap, not because the frontier ran
+dry. If a run looks shallow, raise `--max-pages` (or set it to `0`) before
+suspecting the crawl logic. Roughly 2.2 pages/second with a 4-worker browser
+pool, so a few thousand pages is minutes, not hours.
+
+Two other levers matter:
+
+- `--pages-per-domain` (default 10) trades depth-per-host for breadth. Raising
+  it finds more within large sites like `lsa.umich.edu`.
+- The noise list excludes Google, social, CDNs and **every non-UM `.edu`**. An
+  800-page crawl skipped 4,743 links across 77 noise domains. Scanners that
+  count raw domains will report a much larger number for the same crawl; the
+  totals are not measuring the same thing.
+
+A crawler can only find hosts that something links to. Hosts nothing links to
+need enumeration rather than crawling -- Certificate Transparency logs
+(`crt.sh`) list every `*.umich.edu` name that has ever been issued a
+certificate, and would seed the crawl far more completely than the link graph
+alone.
 
 ## Bot protection, and where this tool stops
 
