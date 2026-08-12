@@ -51,25 +51,33 @@ def normalize_url(url: str, base: str | None = None) -> str | None:
         if low.startswith(bad):
             return None
 
-    if base:
-        url = urljoin(base, url)
-    url, _ = urldefrag(url)
+    # Python's URL parser raises ValueError on malformed authorities -- a
+    # templating placeholder like "[openid_connect_generic_auth_url]" reads as
+    # a bracketed IPv6 host. A bad link must never abort a crawl.
+    try:
+        if base:
+            url = urljoin(base, url)
+        url, _ = urldefrag(url)
 
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https"):
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https"):
+            return None
+
+        host = (parts.hostname or "").lower().strip(".")
+        port = parts.port
+    except ValueError:
         return None
 
-    host = (parts.hostname or "").lower().strip(".")
     if not host or "." not in host:
         return None
 
     # Drop the default port, keep any non-default one.
     netloc = host
-    if parts.port and not (
-        (parts.scheme == "http" and parts.port == 80)
-        or (parts.scheme == "https" and parts.port == 443)
+    if port and not (
+        (parts.scheme == "http" and port == 80)
+        or (parts.scheme == "https" and port == 443)
     ):
-        netloc = f"{host}:{parts.port}"
+        netloc = f"{host}:{port}"
 
     path = parts.path or "/"
     return urlunsplit((parts.scheme, netloc, path, parts.query, ""))
@@ -77,7 +85,10 @@ def normalize_url(url: str, base: str | None = None) -> str | None:
 
 def host_of(url: str) -> str:
     """Lowercased hostname with any leading 'www.' preserved."""
-    return (urlsplit(url).hostname or "").lower().strip(".")
+    try:
+        return (urlsplit(url).hostname or "").lower().strip(".")
+    except ValueError:
+        return ""
 
 
 def registrable_domain(host: str) -> str:

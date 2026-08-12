@@ -11,7 +11,7 @@ from umscan.extract import Page, clean_email
 from umscan.profile import Profiler
 from umscan.urls import (
     EXTERNAL, INTERNAL, NOISE, classify, has_skippable_extension,
-    is_internal_host, normalize_url, registrable_domain,
+    host_of, is_internal_host, normalize_url, registrable_domain,
 )
 from umscan.render import (
     HybridFetcher, PlaywrightFetcher, RENDER_UNAVAILABLE, _looks_like_js_shell,
@@ -63,6 +63,16 @@ class TestUrls(unittest.TestCase):
         self.assertEqual(classify("https://docs.google.com/a")[0], NOISE)
         # Every non-UM .edu is noise.
         self.assertEqual(classify("https://www.msu.edu/")[0], NOISE)
+
+    def test_malformed_urls_return_none_instead_of_raising(self):
+        """Regression: a bracketed authority used to abort the whole crawl."""
+        for bad in ("http://[openid_connect_generic_auth_url]/x",
+                    "//[not-an-ip]/y",
+                    "http://[]/z"):
+            self.assertIsNone(normalize_url(bad, "https://x.umich.edu/"), bad)
+
+    def test_host_of_tolerates_malformed_url(self):
+        self.assertEqual(host_of("http://[bad]/x"), "")
 
     def test_skippable_extensions(self):
         self.assertTrue(has_skippable_extension("https://x.umich.edu/report.pdf"))
@@ -305,6 +315,21 @@ class _StubFetcher:
 
     def close(self):
         pass
+
+
+class TestCrawlFaultIsolation(unittest.TestCase):
+    def test_fetch_exception_becomes_an_error_response(self):
+        from umscan.config import Settings
+        from umscan.crawl import Crawler
+
+        class _Exploding:
+            def get(self, url, retries=1):
+                raise RuntimeError("socket exploded")
+
+        crawler = Crawler(Settings(), _Exploding())
+        resp = crawler._safe_fetch("https://x.umich.edu/")
+        self.assertFalse(resp.usable)
+        self.assertIn("socket exploded", resp.note)
 
 
 class TestPageBudget(unittest.TestCase):

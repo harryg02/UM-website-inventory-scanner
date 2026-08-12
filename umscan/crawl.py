@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 from . import urls as u
 from .config import Settings
 from .extract import Page
-from .fetch import CHALLENGED, Fetcher, Response
+from .fetch import CHALLENGED, ERROR, Fetcher, Response
 
 
 @dataclass
@@ -108,13 +108,24 @@ class Crawler:
             if not batch:
                 break
 
-            for resp in pool.map(self.fetcher.get, batch):
+            for resp in pool.map(self._safe_fetch, batch):
                 self.result.pages_fetched += 1
-                self._handle(resp, frontier, queued, pages_by_host)
+                try:
+                    self._handle(resp, frontier, queued, pages_by_host)
+                except Exception as exc:      # a single bad page, not a dead crawl
+                    self.result.failures["parse_error"] += 1
+                    self.log(f"[skip] parse_error   {resp.url} ({type(exc).__name__}: {exc})")
 
             if self.s.max_domains and len(self.result.domains) >= self.s.max_domains:
                 self.log(f"[crawl] domain cap {self.s.max_domains} reached")
                 break
+
+    def _safe_fetch(self, url: str) -> Response:
+        """Fetch failures are data, never exceptions that unwind the pool."""
+        try:
+            return self.fetcher.get(url)
+        except Exception as exc:
+            return Response(url, ERROR, note=f"{type(exc).__name__}: {exc}"[:160])
 
     def _handle(self, resp: Response, frontier: deque, queued: set,
                 pages_by_host: Counter) -> None:
