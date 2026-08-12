@@ -92,6 +92,10 @@ python3 test_umscan.py    # 24 offline tests, no network needed
   not logged, not looked up, and not followed.
 - Ignores `robots.txt` by design, but keeps a per-host delay (`--delay`,
   default 0.4s) so it stays polite in practice.
+- Isolates faults per page and per domain. A malformed link, an unparseable
+  response or a single failing WHOIS lookup is recorded and skipped -- it never
+  aborts a run that may have taken an hour. Ctrl-C still writes what has been
+  collected so far.
 
 Internal domains key on the full host, so `lsa.umich.edu` and
 `lib.umich.edu` are separate inventory rows — that is the point of the
