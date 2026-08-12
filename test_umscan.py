@@ -134,6 +134,21 @@ class TestAffiliation(unittest.TestCase):
         a = assess(Evidence("somejournal.us", whois_emails=["prof@umich.edu"]))
         self.assertEqual(a.label, REVIEW)
 
+    def test_um_health_domains_are_recognised(self):
+        # Real UM Health properties that scored only 4-5 before tuning.
+        a = assess(Evidence("uofmhealth.org",
+                            page_text="University of Michigan Health. "
+                                      "University of Michigan. University of Michigan.",
+                            links_to_umich=True))
+        self.assertEqual(a.label, AFFILIATED)
+        b = assess(Evidence("myuofmhealth.org", nameservers=["ns1.umich.edu"]))
+        self.assertEqual(b.label, AFFILIATED)
+
+    def test_specific_token_beats_generic_one(self):
+        a = assess(Evidence("michiganmedicine.org"))
+        self.assertIn("domain-token-michiganmedicine", a.reason)
+        self.assertNotIn("domain-token-michigan(", a.reason)
+
     def test_signals_are_reported(self):
         a = assess(Evidence("x.org", nameservers=["ns1.umich.edu"]))
         self.assertIn("nameserver-umich", a.reason)

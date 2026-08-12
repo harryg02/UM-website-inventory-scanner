@@ -115,9 +115,14 @@ Two real examples of why the multi-signal approach matters:
 instead of HTML.
 
 With `--render`, Chromium loads the page, runs the challenge script, and the
-interstitial resolves on its own — the seed becomes crawlable and the
-inventory roughly triples. The browser sends the same self-identifying user
-agent as the HTTP client (`…UM-Inventory-Scanner/0.1`); nothing is disguised.
+interstitial resolves on its own. Challenge-blocked hosts dropped from 19 to 1
+and the inventory went from 80 domains to 208. The browser sends the same
+self-identifying user agent as the HTTP client (`…UM-Inventory-Scanner/0.1`);
+nothing is disguised.
+
+It is not a complete fix: 18 of 116 render attempts stayed on the challenge
+page and are reported as such. Some Cloudflare configurations do not resolve
+without interaction, and that is where this tool stops.
 
 **What this tool will not do:** patch `navigator.webdriver`, spoof TLS or
 canvas fingerprints, install stealth plugins, rotate residential proxies, or
@@ -135,49 +140,41 @@ which path was taken and how many hosts stayed blocked.
 
 ## What a real run looks like
 
-**Plain HTTP, seed blocked, fallback path** — 80 pages, 134 seconds, fully
-profiled:
+Same 60-page budget, with and without the browser fallback. Both fully
+profiled (WHOIS + contact pages):
+
+| | plain HTTP | `--render` |
+| --- | --- | --- |
+| seed reachable | no — used fallback hosts | **yes** |
+| pages parsed | 43 / 60 | **58 / 60** |
+| challenge-blocked hosts | 19 | **1** |
+| domains inventoried | 80 | **208** |
+| internal | 52 | **168** |
+| affiliated / review / unrelated | 6 / 4 / 18 | **9 / 7 / 24** |
+| browser renders | — | 116 attempted, 91 recovered, 18 still blocked |
+| wall clock | 134s | 356s |
+
+The affiliated set from the rendered run — not one of these is on `umich.edu`:
 
 ```
-internal            : 52
-external-affiliated : 6      michigandaily.com, ums.org, a2ru.org,
-                             michiganpublic.org, lcbrd.com, tpluseplusaplusm.us
-external-review     : 4      michiganmedicine.org, dimensionsjournal.us,
-                             taubmanacdcc.com, rvtr.com
-external-unrelated  : 18
-noise links skipped : 411 across 26 domains
-bot-protected hosts : 19
+michigandaily.com      ums.org               michiganmedicine.org
+umjobs.org             sindecusemuseum.org   mgoblue.com
+michiganpublic.org     myumi.ch              urcmich.org
 ```
 
-**With `--render`, from the real seed** — the crawl reaches far more of the
-university, because `www.umich.edu` and its heavily-linked siblings become
-readable:
+Every one has a redacted or unhelpful WHOIS record. They were caught by UM
+nameservers, `@umich.edu` addresses published on the page
+(`dentalmuseum@umich.edu`, `bpilz@umich.edu`), and copyright text — which is
+the entire argument for scoring several signals rather than trusting WHOIS.
 
-```
-30 pages   -> 162 domains (134 internal), 16 browser renders, 15 recovered
-60 pages   -> ~208 domains        (vs 80 domains for 60 pages without --render)
-```
+The review bucket earns its keep as well. It held `theconversation.com` and
+`wilx.com`, which publish UM stories without being UM, next to `mden.com`,
+the licensed merchandise retailer — genuinely arguable calls that belong in
+front of a human instead of inside a guess.
 
-Rendering roughly triples domain discovery at the same page budget. It also
-costs real time: the browser is a single serialized worker, so a fully
-profiled `--render` run over hundreds of domains takes considerably longer
-than the 134 seconds above. Use `--skip-whois` while iterating.
-
-The affiliated set is the interesting part — none of those domains are on
-`umich.edu`, and only two have "michigan" in the name:
-
-- `ums.org` (University Musical Society) — registrant redacted, but UM
-  nameservers and `umstix@umich.edu` on the page.
-- `a2ru.org` — `a2ruconnect@umich.edu` on the contact page.
-- `tpluseplusaplusm.us` — WHOIS registrant is a UM faculty member
-  (`afure@umich.edu`).
-- `lcbrd.com` — behind a privacy proxy, but publishes
-  `lcbrd.initiative@umich.edu`.
-
-`michiganmedicine.org` landing in `external-review` shows the design working
-as intended: its homepage was challenge-blocked, so only the domain name
-scored, and the audit CSV records `homepage behind bot protection` as the
-reason. Less evidence means a lower bucket, not a confident guess.
+Rendering costs time: one browser serves every worker, so renders serialise.
+Use `--skip-whois` while iterating on the crawl, and expect a fully profiled
+`--render` run over hundreds of domains to take minutes rather than seconds.
 
 ## Layout
 

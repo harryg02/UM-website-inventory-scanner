@@ -38,14 +38,19 @@ _RIVALS = re.compile(
 )
 
 # Domain-name tokens, weighted by how much they actually imply UM.
+# Ordered most specific first: the loop takes the first match, so
+# "michiganmedicine" must be tested before "michigan" and "uofmhealth"
+# before "uofm".
 _DOMAIN_TOKENS = [
+    ("michiganmedicine", 4),
+    ("uofmhealth", 4),
     ("umich", 4),
     ("mgoblue", 3),
     ("goblue", 3),
+    ("umhealth", 3),
+    ("uofm", 3),
     ("wolverine", 2),
     ("victors", 2),
-    ("michiganmedicine", 4),
-    ("umhealth", 3),
     ("michigan", 1),
     ("annarbor", 1),
 ]
