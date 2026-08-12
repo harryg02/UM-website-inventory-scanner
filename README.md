@@ -3,15 +3,24 @@
 Crawls `umich.edu`, logs every domain it links out to, and takes a position on
 which of the external ones are actually University of Michigan properties.
 
-Output is a single CSV with five columns:
+Output is a single CSV with four columns:
 
 | column | meaning |
 | --- | --- |
 | `domain` | the host (UM subdomains) or registrable domain (everything else) |
 | `type` | `internal`, `external-affiliated`, `external-review`, `external-unrelated` |
-| `whois_contact` | registrant org and/or email from the WHOIS record |
+| `whois_contact` | the technical contact's email address from the WHOIS record |
 | `on_page_contact` | best email addresses scraped from the homepage and `/contact` |
-| `source_url` | the page where this domain was first seen |
+
+`whois_contact` is the **technical contact** address — the party who actually
+runs the domain. Records with no technical contact fall back to the
+administrative then registrant address, and `--evidence` records which role
+each address came from. A privacy-proxied or abuse-only record reports
+`redacted` rather than passing off a registrar's abuse mailbox as a contact.
+
+`--evidence` also keeps `source_url` (the page a domain was first seen on)
+alongside the affiliation score, so provenance is still available for
+debugging without cluttering the deliverable.
 
 ## Running it
 
