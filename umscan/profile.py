@@ -26,6 +26,7 @@ class DomainProfile:
     whois_contact: str
     on_page_contact: str
     source_url: str
+    whois_role: str = ""
     score: int = 0
     reason: str = ""
     fetch_note: str = ""
@@ -69,11 +70,12 @@ class Profiler:
         if not self.s.skip_whois:
             record = self.whois.lookup(u.registrable_domain(hit.domain))
             whois_contact = record.contact()
+            whois_role = record.contact_role
             ev.whois_org = record.org
             ev.whois_emails = list(record.emails)
             ev.nameservers = list(record.nameservers)
         else:
-            whois_contact = ""
+            whois_contact = whois_role = ""
 
         page_emails: list[str] = []
         if not self.s.skip_contacts:
@@ -94,6 +96,7 @@ class Profiler:
             whois_contact=whois_contact,
             on_page_contact=self._best_contacts(page_emails, hit.domain),
             source_url=hit.source_url,
+            whois_role=whois_role,
             score=score,
             reason=reason,
             fetch_note="; ".join(notes),

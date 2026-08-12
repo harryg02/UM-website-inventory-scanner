@@ -8,10 +8,10 @@ import sys
 from . import urls as u
 from .affiliation import AFFILIATED, REVIEW, UNRELATED
 
-COLUMNS = ["domain", "type", "whois_contact", "on_page_contact", "source_url"]
+COLUMNS = ["domain", "type", "whois_contact", "on_page_contact"]
 
 EVIDENCE_COLUMNS = [
-    "domain", "type", "score", "signals", "whois_contact",
+    "domain", "type", "score", "signals", "whois_contact", "whois_role",
     "on_page_contact", "source_url", "notes",
 ]
 
@@ -28,8 +28,7 @@ def write_csv(profiles: list, path: str) -> int:
         writer = csv.writer(fh)
         writer.writerow(COLUMNS)
         for p in rows:
-            writer.writerow([p.domain, p.type, p.whois_contact,
-                             p.on_page_contact, p.source_url])
+            writer.writerow([p.domain, p.type, p.whois_contact, p.on_page_contact])
     return len(rows)
 
 
@@ -40,7 +39,8 @@ def write_evidence_csv(profiles: list, path: str) -> int:
         writer.writerow(EVIDENCE_COLUMNS)
         for p in rows:
             writer.writerow([p.domain, p.type, p.score, p.reason, p.whois_contact,
-                             p.on_page_contact, p.source_url, p.fetch_note])
+                             p.whois_role, p.on_page_contact, p.source_url,
+                             p.fetch_note])
     return len(rows)
 
 

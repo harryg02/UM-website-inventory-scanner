@@ -79,25 +79,22 @@ class WhoisResult:
     error: str = ""
     raw: str = ""
     real_emails: list[str] = field(default_factory=list)
+    by_role: dict = field(default_factory=dict)   # tech/admin/registrant -> emails
+    tech_contact: str = ""
+    contact_role: str = ""
 
     def contact(self) -> str:
-        """The single cell that goes in the CSV's whois_contact column."""
+        """The technical contact's email address, for the CSV column.
+
+        Falls back to the admin then registrant address when a record has no
+        technical contact; `contact_role` records which one was used. A
+        registrar abuse mailbox is never offered as the domain's contact.
+        """
         if not self.ok:
             return f"lookup failed: {self.error}" if self.error else ""
-        bits = []
-        if self.org:
-            bits.append(self.org)
-        if self.real_emails:
-            bits.append(self.real_emails[0])
-        if bits:
-            return " | ".join(bits)
-        # Nothing but privacy-proxy boilerplate: say so rather than pass off
-        # a registrar abuse mailbox as the domain owner.
-        if self.redacted:
-            return f"redacted (registrar: {self.registrar})" if self.registrar else "redacted"
-        if self.emails:
-            return self.emails[0]
-        return f"registrar: {self.registrar}" if self.registrar else ""
+        if self.tech_contact:
+            return self.tech_contact
+        return "redacted" if self.redacted else ""
 
 
 class WhoisClient:
@@ -243,8 +240,8 @@ def _parse(domain: str, raw: str, server: str) -> WhoisResult:
     res.ok = True
     res.redacted = any(m in low for m in REDACTION_MARKERS)
 
-    kv_org, kv_emails, kv_ns, registrar, created, abuse = _parse_key_values(raw)
-    blk_org, blk_emails, blk_ns = _parse_blocks(raw)
+    kv_org, kv_emails, kv_roles, kv_ns, registrar, created, abuse = _parse_key_values(raw)
+    blk_org, blk_emails, blk_roles, blk_ns = _parse_blocks(raw)
 
     res.org = _best_org(kv_org or blk_org)
     res.registrar = registrar
@@ -260,13 +257,32 @@ def _parse(domain: str, raw: str, server: str) -> WhoisResult:
     res.real_emails = real
     res.emails = real + [e for e in emails if e not in real]
 
+    res.by_role = _merge_roles(kv_roles, blk_roles)
+    res.tech_contact, res.contact_role = _pick_contact(res.by_role, abuse)
+
     res.nameservers = _dedupe(n.lower() for n in (kv_ns + blk_ns))
     return res
+
+
+def _role_of(key: str) -> str:
+    """Which contact block a WHOIS field belongs to."""
+    if key in _ABUSE_KEYS or "abuse" in key:
+        return "abuse"
+    if key.startswith(("tech", "technical")):
+        return "tech"
+    if key.startswith(("admin", "administrative")):
+        return "admin"
+    if key.startswith("registrant"):
+        return "registrant"
+    if key.startswith("billing"):
+        return "billing"
+    return "other"
 
 
 def _parse_key_values(raw: str):
     orgs: list[str] = []
     emails: list[str] = []
+    by_role: dict = {}
     nameservers: list[str] = []
     abuse: set[str] = set()
     registrar = created = ""
@@ -285,7 +301,9 @@ def _parse_key_values(raw: str):
                 abuse.add(e.lower())
                 emails.append(e.lower())
         elif key in _EMAIL_KEYS or (key.endswith("email") and "@" in value):
-            emails.extend(e.lower() for e in _EMAIL_RE.findall(value))
+            found = [e.lower() for e in _EMAIL_RE.findall(value)]
+            emails.extend(found)
+            by_role.setdefault(_role_of(key), []).extend(found)
         elif key in _ORG_KEYS:
             orgs.append(value)
         elif key in _NS_KEYS:
@@ -297,13 +315,21 @@ def _parse_key_values(raw: str):
         elif key in ("creation date", "created", "domain record activated") and not created:
             created = value
 
-    return orgs, emails, nameservers, registrar, created, abuse
+    return orgs, emails, by_role, nameservers, registrar, created, abuse
+
+
+_BLOCK_ROLES = {
+    "registrant": "registrant",
+    "administrative contact": "admin",
+    "technical contact": "tech",
+}
 
 
 def _parse_blocks(raw: str):
     """Handle EDUCAUSE-style records: a header line, then indented values."""
     orgs: list[str] = []
     emails: list[str] = []
+    by_role: dict = {}
     nameservers: list[str] = []
 
     lines = raw.splitlines()
@@ -326,17 +352,19 @@ def _parse_blocks(raw: str):
             nameservers.extend(b.split()[0].strip(".").lower() for b in body if "." in b)
             continue
 
+        role = _BLOCK_ROLES.get(name, "other")
         for entry in body:
-            found = _EMAIL_RE.findall(entry)
+            found = [e.lower() for e in _EMAIL_RE.findall(entry)]
             if found:
-                emails.extend(e.lower() for e in found)
+                emails.extend(found)
+                by_role.setdefault(role, []).extend(found)
         if name == "registrant":
             for entry in body:
                 if "@" not in entry and not re.match(r"^[\d\s\-+().]+$", entry):
                     orgs.append(entry)
                     break
 
-    return orgs, emails, nameservers
+    return orgs, emails, by_role, nameservers
 
 
 def _best_org(candidates: list[str]) -> str:
@@ -365,6 +393,24 @@ def _is_boilerplate_email(email: str) -> bool:
     ))
 
 
+def _merge_roles(*buckets) -> dict:
+    merged: dict = {}
+    for bucket in buckets:
+        for role, addresses in bucket.items():
+            merged.setdefault(role, []).extend(addresses)
+    return {role: _dedupe(addrs) for role, addrs in merged.items()}
+
+
+def _pick_contact(by_role: dict, abuse: set) -> tuple[str, str]:
+    """Technical contact first; admin and registrant only as fallbacks."""
+    for role in ("tech", "admin", "registrant", "other"):
+        for email in by_role.get(role, []):
+            if email in abuse or _is_boilerplate_email(email) or _is_proxy_email(email):
+                continue
+            return email, role
+    return "", ""
+
+
 def _dedupe(items) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -385,6 +431,11 @@ def _merge(primary: WhoisResult, extra: WhoisResult) -> WhoisResult:
         merged.org = extra.org
     merged.emails = _dedupe(merged.emails + extra.emails)
     merged.real_emails = _dedupe(merged.real_emails + extra.real_emails)
+    merged.by_role = _merge_roles(merged.by_role, extra.by_role)
+    if not merged.tech_contact or (extra.contact_role == "tech"
+                                   and merged.contact_role != "tech"):
+        if extra.tech_contact:
+            merged.tech_contact, merged.contact_role = extra.tech_contact, extra.contact_role
     merged.nameservers = _dedupe(merged.nameservers + extra.nameservers)
     merged.registrar = merged.registrar or extra.registrar
     merged.created = merged.created or extra.created

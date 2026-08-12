@@ -17,6 +17,7 @@ from umscan.render import (
     HybridFetcher, PlaywrightFetcher, RENDER_UNAVAILABLE, _looks_like_js_shell,
     _worth_rendering,
 )
+from umscan import report
 from umscan.crawl import DomainHit
 from umscan.fetch import CHALLENGED, ERROR, OK, Fetcher, Response
 from umscan.profile import _failed
@@ -190,8 +191,47 @@ Name Server: cffw1.dns.umich.com
         r = _parse("example.org", self.THIN_REDACTED, "whois.pir.org")
         self.assertTrue(r.redacted)
         self.assertEqual(r.real_emails, [])
-        self.assertIn("redacted", r.contact())
-        self.assertIn("Tucows", r.contact())
+        # The column is an address, so a registrar abuse mailbox is not an answer.
+        self.assertEqual(r.contact(), "redacted")
+
+    def test_technical_contact_is_preferred(self):
+        record = """Domain Name: example.com
+Registrant Email: owner@example.com
+Admin Email: admin@example.com
+Tech Email: hostmaster@example.com
+Registrar Abuse Contact Email: abuse@registrar.com
+"""
+        r = _parse("example.com", record, "whois.verisign-grs.com")
+        self.assertEqual(r.contact(), "hostmaster@example.com")
+        self.assertEqual(r.contact_role, "tech")
+
+    def test_falls_back_to_admin_then_registrant(self):
+        no_tech = """Domain Name: example.com
+Registrant Email: owner@example.com
+Admin Email: admin@example.com
+"""
+        r = _parse("example.com", no_tech, "whois.verisign-grs.com")
+        self.assertEqual(r.contact(), "admin@example.com")
+        self.assertEqual(r.contact_role, "admin")
+
+        only_owner = "Domain Name: example.com\nRegistrant Email: owner@example.com\n"
+        r2 = _parse("example.com", only_owner, "whois.verisign-grs.com")
+        self.assertEqual(r2.contact(), "owner@example.com")
+        self.assertEqual(r2.contact_role, "registrant")
+
+    def test_proxy_tech_address_is_rejected(self):
+        proxied = """Domain Name: example.com
+Tech Email: %s@example.com.whoisproxy.org
+Registrar: Amazon Registrar, Inc.
+Registrant Organization: c/o whoisproxy.com
+""" % ("a1b2c3d4" * 8)
+        r = _parse("example.com", proxied, "whois.verisign-grs.com")
+        self.assertEqual(r.contact(), "redacted")
+
+    def test_educause_technical_block_wins(self):
+        r = _parse("umich.edu", self.EDUCAUSE, "whois.educause.edu")
+        self.assertEqual(r.contact(), "domainreg@umich.edu")
+        self.assertIn(r.contact_role, ("tech", "admin"))
 
     def test_registry_refusal_is_flagged(self):
         r = _parse("myumi.ch", "Requests of this client are not permitted.", "whois.nic.ch")
@@ -265,6 +305,16 @@ class _StubFetcher:
 
     def close(self):
         pass
+
+
+class TestReportColumns(unittest.TestCase):
+    def test_csv_has_four_columns_without_source_url(self):
+        self.assertEqual(report.COLUMNS,
+                         ["domain", "type", "whois_contact", "on_page_contact"])
+
+    def test_audit_csv_still_records_provenance(self):
+        for column in ("source_url", "whois_role", "signals"):
+            self.assertIn(column, report.EVIDENCE_COLUMNS)
 
 
 class TestRenderPolicy(unittest.TestCase):
