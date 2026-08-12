@@ -158,25 +158,27 @@ Two real examples of why the multi-signal approach matters:
 Domain discovery is bounded by the page budget, not by the crawler running out
 of links. Measured, crawl-only, with `--render`:
 
-| pages | domains found |
-| --- | --- |
-| 30 | 162 |
-| 60 | ~208 |
-| 800 | 895 (507 internal, 388 external) |
+| pages | domains found | wall time |
+| --- | --- | --- |
+| 30 | 162 | seconds |
+| 60 | ~208 | seconds |
+| 800 | 895 (507 internal, 388 external) | 6 min |
+| 4000 | **2203** (903 internal, 1300 external) | 41 min |
 
-The 800-page run stopped because it hit the cap, not because the frontier ran
-dry. If a run looks shallow, raise `--max-pages` (or set it to `0`) before
-suspecting the crawl logic. Roughly 2.2 pages/second with a 4-worker browser
-pool, so a few thousand pages is minutes, not hours.
+Every one of those runs stopped on the page cap, not on an empty frontier --
+including the 4000-page one. Discovery was still climbing when each ended, so
+if a run looks shallow, raise `--max-pages` (or set it to `0`) before
+suspecting the crawl logic. Throughput is roughly 1.6 pages/second with a
+4-worker browser pool.
 
 Two other levers matter:
 
 - `--pages-per-domain` (default 10) trades depth-per-host for breadth. Raising
   it finds more within large sites like `lsa.umich.edu`.
-- The noise list excludes Google, social, CDNs and **every non-UM `.edu`**. An
-  800-page crawl skipped 4,743 links across 77 noise domains. Scanners that
-  count raw domains will report a much larger number for the same crawl; the
-  totals are not measuring the same thing.
+- The noise list excludes Google, social, CDNs and **every non-UM `.edu`**. The
+  4000-page crawl skipped 14,072 links across 198 noise domains -- those would
+  add ~9% to a raw domain count. Scanners that count everything will report a
+  larger number for the same crawl; the totals are not measuring the same thing.
 
 A crawler can only find hosts that something links to. Hosts nothing links to
 need enumeration rather than crawling -- Certificate Transparency logs

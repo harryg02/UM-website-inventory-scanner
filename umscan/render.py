@@ -129,7 +129,7 @@ class PlaywrightFetcher:
             self._ready.set()
             return
 
-        browser = context = None
+        browser = context = page = None
         try:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=self.headless)
@@ -163,7 +163,7 @@ class PlaywrightFetcher:
                 self.error = f"{type(exc).__name__}: {exc}"[:300]
             self._ready.set()
         finally:
-            for closer in (context, browser):
+            for closer in (page, context, browser):
                 try:
                     if closer:
                         closer.close()
