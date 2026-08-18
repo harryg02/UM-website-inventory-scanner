@@ -3,6 +3,43 @@
 Crawls `umich.edu`, logs every domain it links out to, and takes a position on
 which of the external ones are actually University of Michigan properties.
 
+## Why this exists
+
+The University of Michigan has no single list of the websites that represent
+it. `umich.edu` is only the part that is easy to find. Departments, labs,
+centres, student organisations, clinical services, conferences and grant
+projects routinely register their own domains: `.org`, `.com`, `.us`, even
+`.in`, and those sites carry UM's name while appearing in no central
+register.
+
+The 4000-page crawl recorded below found 80 external domains that are
+demonstrably UM properties. Not one is on `umich.edu`, and most are not
+guessable from the name:
+
+```
+umichcdb.org      umlib.us          um-israel.org
+umnursing.org     cygnss-spock.com  umicheng.in
+```
+
+Not having that list has practical consequences:
+
+- **Security.** A domain nobody has recorded is a domain nobody is watching.
+  Affiliate domains routinely outlive the grant or the staff member that
+  registered them; a lapsed domain can be re-registered by anyone while UM
+  pages still link to it.
+- **Trust.** If the institution cannot say which sites are officially its own,
+  neither can the public — which is precisely the gap a convincing lookalike
+  needs.
+- **Policy.** Accessibility, privacy and branding requirements can only be
+  applied to sites somebody knows exist.
+- **Offboarding.** When a project ends, nobody can retire assets that were
+  never inventoried.
+
+This tool produces that inventory automatically as a first pass. Crawling the
+link graph is the straightforward half. The hard half is deciding which of the
+external domains are actually UM's, and that judgement is what most of this
+code is about.
+
 Output is a single CSV with four columns:
 
 | column | meaning |
